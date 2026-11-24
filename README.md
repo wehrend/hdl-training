@@ -19,7 +19,7 @@ Requirements: [Icarus Verilog](https://steveicarus.github.io/iverilog/), and GTK
 | `24_sequential_verilog/02-counter` | `iverilog -o sim counter_updown_tb.v counter_updown.v && vvp sim` |
 | `24_sequential_verilog/03-traffic-light` | `iverilog -o sim traffic_light_tb.v traffic_light.v traffic_light_eq.v && vvp sim` |
 | `24_sequential_verilog/04-sequence-detector` | `iverilog -o sim seq101_tb.v seq101_mealy.v seq101_moore.v && vvp sim` (bonus) |
-| `25_arithmetic_units/00-barrel-shifter` | `iverilog -o sim barrel_shifter_tb.v barrel_shifter.v && vvp sim` |
+| `25_arithmetic_units/00-barrel-shifter` | `iverilog -o sim shifters_tb.v sll.v srl.v sra.v shifter_all.v && vvp sim` |
 | `25_arithmetic_units/01-array-multiplier` | `iverilog -o sim array_multiplier_tb.v array_multiplier.v ripple_adder.v full_adder.v && vvp sim` |
 | `25_arithmetic_units/02-shift-add-multiplier` | `iverilog -o sim seq_multiplier_tb.v seq_multiplier.v && vvp sim` |
 | `25_arithmetic_units/03-divider` | `iverilog -o sim seq_divider_tb.v seq_divider.v && vvp sim` |
