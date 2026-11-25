@@ -1,0 +1,945 @@
+From 02c4584304f38f585527e59a044afb4dc24d4bee Mon Sep 17 00:00:00 2001
+From: Sven Wehrend <wehrend@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 20:37:15 +0100
+Subject: [PATCH] chapter 27: Go Board examples (blinky, synthesis, CPU on the
+ iCE40)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_018Me4hFC2uG4Mhf8ZGvsPeu
+---
+ 27_code_to_chip/.gitignore                    |  7 ++
+ 27_code_to_chip/00-blinky/Makefile            |  5 ++
+ 27_code_to_chip/00-blinky/blinky.v            | 21 +++++
+ 27_code_to_chip/00-blinky/blinky_tb.v         | 28 ++++++
+ 27_code_to_chip/01-synthesis/Makefile         | 11 +++
+ 27_code_to_chip/01-synthesis/hex_display.v    | 24 +++++
+ 27_code_to_chip/01-synthesis/hex_display_tb.v | 37 ++++++++
+ 27_code_to_chip/01-synthesis/seven_seg.v      | 28 ++++++
+ 27_code_to_chip/02-cpu-go-board/Makefile      |  6 ++
+ 27_code_to_chip/02-cpu-go-board/alu.v         | 45 ++++++++++
+ 27_code_to_chip/02-cpu-go-board/alu_cell.v    | 30 +++++++
+ 27_code_to_chip/02-cpu-go-board/alu_control.v | 23 +++++
+ 27_code_to_chip/02-cpu-go-board/control.v     | 29 ++++++
+ 27_code_to_chip/02-cpu-go-board/cpu.v         | 89 +++++++++++++++++++
+ 27_code_to_chip/02-cpu-go-board/data_mem.v    | 23 +++++
+ .../02-cpu-go-board/go_board_top.v            | 64 +++++++++++++
+ .../02-cpu-go-board/go_board_top_tb.v         | 50 +++++++++++
+ 27_code_to_chip/02-cpu-go-board/imm_gen.v     | 19 ++++
+ 27_code_to_chip/02-cpu-go-board/instr_mem.v   | 15 ++++
+ 27_code_to_chip/02-cpu-go-board/program.hex   | 10 +++
+ 27_code_to_chip/02-cpu-go-board/regfile.v     | 41 +++++++++
+ 27_code_to_chip/02-cpu-go-board/seven_seg.v   | 28 ++++++
+ 27_code_to_chip/fpga.mk                       | 41 +++++++++
+ 27_code_to_chip/go_board.pcf                  | 37 ++++++++
+ README.md                                     | 19 ++++
+ 25 files changed, 730 insertions(+)
+ create mode 100644 27_code_to_chip/.gitignore
+ create mode 100644 27_code_to_chip/00-blinky/Makefile
+ create mode 100644 27_code_to_chip/00-blinky/blinky.v
+ create mode 100644 27_code_to_chip/00-blinky/blinky_tb.v
+ create mode 100644 27_code_to_chip/01-synthesis/Makefile
+ create mode 100644 27_code_to_chip/01-synthesis/hex_display.v
+ create mode 100644 27_code_to_chip/01-synthesis/hex_display_tb.v
+ create mode 100644 27_code_to_chip/01-synthesis/seven_seg.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/Makefile
+ create mode 100644 27_code_to_chip/02-cpu-go-board/alu.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/alu_cell.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/alu_control.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/control.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/cpu.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/data_mem.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/go_board_top.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/go_board_top_tb.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/imm_gen.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/instr_mem.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/program.hex
+ create mode 100644 27_code_to_chip/02-cpu-go-board/regfile.v
+ create mode 100644 27_code_to_chip/02-cpu-go-board/seven_seg.v
+ create mode 100644 27_code_to_chip/fpga.mk
+ create mode 100644 27_code_to_chip/go_board.pcf
+
+diff --git a/27_code_to_chip/.gitignore b/27_code_to_chip/.gitignore
+new file mode 100644
+index 0000000..71b7f6e
+--- /dev/null
++++ b/27_code_to_chip/.gitignore
+@@ -0,0 +1,7 @@
++*.json
++*.asc
++*.bin
++*.log
++*.svg
++sim
++*.dot
+diff --git a/27_code_to_chip/00-blinky/Makefile b/27_code_to_chip/00-blinky/Makefile
+new file mode 100644
+index 0000000..ecde943
+--- /dev/null
++++ b/27_code_to_chip/00-blinky/Makefile
+@@ -0,0 +1,5 @@
++TOP = blinky
++SRC = blinky.v
++TB  = blinky_tb.v
++
++include ../fpga.mk
+diff --git a/27_code_to_chip/00-blinky/blinky.v b/27_code_to_chip/00-blinky/blinky.v
+new file mode 100644
+index 0000000..b645c0a
+--- /dev/null
++++ b/27_code_to_chip/00-blinky/blinky.v
+@@ -0,0 +1,21 @@
++// Blinky - the "hello world" of FPGAs.
++// A free-running counter divides the 25 MHz clock of the Go Board.
++// The four highest bits drive the four LEDs: they show a binary counter.
++// With WIDTH = 24, the highest bit toggles every 2^23 clock cycles,
++// so LED 4 is on for 0.34 s and off for 0.34 s.
++module blinky #(
++    parameter WIDTH = 24
++) (
++    input  wire i_Clk,
++    output wire o_LED_1,
++    output wire o_LED_2,
++    output wire o_LED_3,
++    output wire o_LED_4
++);
++    reg [WIDTH-1:0] count = 0;          // initial value: the iCE40 starts with 0
++
++    always @(posedge i_Clk)
++        count <= count + 1;
++
++    assign {o_LED_4, o_LED_3, o_LED_2, o_LED_1} = count[WIDTH-1 -: 4];
++endmodule
+diff --git a/27_code_to_chip/00-blinky/blinky_tb.v b/27_code_to_chip/00-blinky/blinky_tb.v
+new file mode 100644
+index 0000000..5f2cf63
+--- /dev/null
++++ b/27_code_to_chip/00-blinky/blinky_tb.v
+@@ -0,0 +1,28 @@
++`timescale 1ns / 1ps
++
++// Testbench for blinky: with WIDTH = 6 instead of 24, the LEDs change every 4 clock cycles,
++// so we can watch them in simulation (with 24 bits we would wait millions of cycles).
++module blinky_tb;
++    reg  clk = 0;
++    wire led1, led2, led3, led4;
++    integer i, errors = 0;
++
++    always #20 clk = ~clk;              // 25 MHz: period 40 ns
++
++    blinky #(.WIDTH(6)) dut (
++        .i_Clk(clk), .o_LED_1(led1), .o_LED_2(led2), .o_LED_3(led3), .o_LED_4(led4)
++    );
++
++    initial begin
++        $dumpfile("blinky.vcd");
++        $dumpvars(0, blinky_tb);
++        for (i = 1; i <= 64; i = i + 1) begin
++            @(posedge clk); #1;
++            if ({led4, led3, led2, led1} !== i[5:2]) errors = errors + 1;
++            if (i % 4 == 0) $display("cycle %2d  LEDs (4..1) = %b%b%b%b", i, led4, led3, led2, led1);
++        end
++        if (errors == 0) $display("PASSED: LEDs show bits 5..2 of the counter");
++        else             $display("FAILED: %0d errors", errors);
++        $finish;
++    end
++endmodule
+diff --git a/27_code_to_chip/01-synthesis/Makefile b/27_code_to_chip/01-synthesis/Makefile
+new file mode 100644
+index 0000000..14ef2da
+--- /dev/null
++++ b/27_code_to_chip/01-synthesis/Makefile
+@@ -0,0 +1,11 @@
++TOP = hex_display
++SRC = hex_display.v seven_seg.v
++TB  = hex_display_tb.v
++
++include ../fpga.mk
++
++# schematic of the decoder after synthesis, as SVG (needs graphviz)
++schematic: seven_seg.v
++	yosys -q -p "synth_ice40 -top seven_seg; show -format svg -prefix seven_seg_ice40" seven_seg.v
++
++.PHONY: schematic
+diff --git a/27_code_to_chip/01-synthesis/hex_display.v b/27_code_to_chip/01-synthesis/hex_display.v
+new file mode 100644
+index 0000000..ce7c3de
+--- /dev/null
++++ b/27_code_to_chip/01-synthesis/hex_display.v
+@@ -0,0 +1,24 @@
++// The 7-segment decoder from chapter 23 on real hardware.
++// The four buttons form a 4-bit number (button 1 = bit 0), the right display shows it as a hex digit.
++// The Go Board's segments are active low (0 = segment on), so the outputs of the decoder are inverted.
++module hex_display (
++    input  wire i_Switch_1,
++    input  wire i_Switch_2,
++    input  wire i_Switch_3,
++    input  wire i_Switch_4,
++    output wire o_Segment2_A,
++    output wire o_Segment2_B,
++    output wire o_Segment2_C,
++    output wire o_Segment2_D,
++    output wire o_Segment2_E,
++    output wire o_Segment2_F,
++    output wire o_Segment2_G
++);
++    wire [3:0] value = {i_Switch_4, i_Switch_3, i_Switch_2, i_Switch_1};
++    wire [6:0] seg;                                  // {g, f, e, d, c, b, a}, 1 = on
++
++    seven_seg dec (.value(value), .seg(seg));
++
++    assign {o_Segment2_G, o_Segment2_F, o_Segment2_E, o_Segment2_D,
++            o_Segment2_C, o_Segment2_B, o_Segment2_A} = ~seg;
++endmodule
+diff --git a/27_code_to_chip/01-synthesis/hex_display_tb.v b/27_code_to_chip/01-synthesis/hex_display_tb.v
+new file mode 100644
+index 0000000..de48ee4
+--- /dev/null
++++ b/27_code_to_chip/01-synthesis/hex_display_tb.v
+@@ -0,0 +1,37 @@
++`timescale 1ns / 1ps
++
++// Testbench for hex_display: all 16 button combinations, checked against the decoder table.
++module hex_display_tb;
++    reg  [3:0] sw;
++    wire a, b, c, d, e, f, g;
++    reg  [6:0] expected;
++    integer i, errors = 0;
++
++    hex_display dut (
++        .i_Switch_1(sw[0]), .i_Switch_2(sw[1]), .i_Switch_3(sw[2]), .i_Switch_4(sw[3]),
++        .o_Segment2_A(a), .o_Segment2_B(b), .o_Segment2_C(c), .o_Segment2_D(d),
++        .o_Segment2_E(e), .o_Segment2_F(f), .o_Segment2_G(g)
++    );
++
++    initial begin
++        for (i = 0; i < 16; i = i + 1) begin
++            sw = i;
++            #10;
++            case (i)                              // {g,f,e,d,c,b,a}, 1 = on (table from chapter 23)
++                0: expected = 7'b0111111;  1: expected = 7'b0000110;
++                2: expected = 7'b1011011;  3: expected = 7'b1001111;
++                4: expected = 7'b1100110;  5: expected = 7'b1101101;
++                6: expected = 7'b1111101;  7: expected = 7'b0000111;
++                8: expected = 7'b1111111;  9: expected = 7'b1101111;
++               10: expected = 7'b1110111; 11: expected = 7'b1111100;
++               12: expected = 7'b0111001; 13: expected = 7'b1011110;
++               14: expected = 7'b1111001; 15: expected = 7'b1110001;
++            endcase
++            if ({g, f, e, d, c, b, a} !== ~expected) errors = errors + 1;
++            $display("buttons %b  pins gfedcba = %b%b%b%b%b%b%b", sw, g, f, e, d, c, b, a);
++        end
++        if (errors == 0) $display("PASSED: all 16 digits (pins are active low)");
++        else             $display("FAILED: %0d errors", errors);
++        $finish;
++    end
++endmodule
+diff --git a/27_code_to_chip/01-synthesis/seven_seg.v b/27_code_to_chip/01-synthesis/seven_seg.v
+new file mode 100644
+index 0000000..d2762fe
+--- /dev/null
++++ b/27_code_to_chip/01-synthesis/seven_seg.v
+@@ -0,0 +1,28 @@
++// 7-segment decoder for the hexadecimal digits 0..F
++// segment order: seg = {g, f, e, d, c, b, a}, 1 = segment on
++module seven_seg (
++    input  wire [3:0] value,
++    output reg  [6:0] seg
++);
++    always @(*) begin
++        case (value)
++            4'h0: seg = 7'b0111111;
++            4'h1: seg = 7'b0000110;
++            4'h2: seg = 7'b1011011;
++            4'h3: seg = 7'b1001111;
++            4'h4: seg = 7'b1100110;
++            4'h5: seg = 7'b1101101;
++            4'h6: seg = 7'b1111101;
++            4'h7: seg = 7'b0000111;
++            4'h8: seg = 7'b1111111;
++            4'h9: seg = 7'b1101111;
++            4'hA: seg = 7'b1110111;
++            4'hB: seg = 7'b1111100;
++            4'hC: seg = 7'b0111001;
++            4'hD: seg = 7'b1011110;
++            4'hE: seg = 7'b1111001;
++            4'hF: seg = 7'b1110001;
++            default: seg = 7'b0000000;
++        endcase
++    end
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/Makefile b/27_code_to_chip/02-cpu-go-board/Makefile
+new file mode 100644
+index 0000000..82b591f
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/Makefile
+@@ -0,0 +1,6 @@
++TOP = go_board_top
++SRC = go_board_top.v cpu.v instr_mem.v data_mem.v regfile.v alu.v alu_cell.v \
++      control.v alu_control.v imm_gen.v seven_seg.v
++TB  = go_board_top_tb.v
++
++include ../fpga.mk
+diff --git a/27_code_to_chip/02-cpu-go-board/alu.v b/27_code_to_chip/02-cpu-go-board/alu.v
+new file mode 100644
+index 0000000..9d568eb
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/alu.v
+@@ -0,0 +1,45 @@
++// N-bit ALU: a chain of 1-bit ALU cells, as in chapter 05.
++// ctrl = {Ainvert, Binvert, Operation}:
++//   0000 and    0001 or    0010 add    0110 sub    0111 slt    1100 nor    1101 nand
++module alu #(
++    parameter N = 32
++) (
++    input  wire [N-1:0] a,
++    input  wire [N-1:0] b,
++    input  wire [3:0]   ctrl,
++    output wire [N-1:0] result,
++    output wire         zero,
++    output wire         overflow
++);
++    wire ainvert = ctrl[3];
++    wire binvert = ctrl[2];
++    wire [1:0] operation = ctrl[1:0];
++
++    wire [N:0]   c;        // carry chain
++    wire [N-1:0] sum;
++    wire         is_less;   // "a < b" for slt
++
++    // subtraction a - b = a + ~b + 1: Binvert also provides the +1 as carry in
++    assign c[0] = binvert;
++
++    genvar i;
++    generate
++        for (i = 0; i < N; i = i + 1) begin : slice
++            alu_cell u (
++                .a(a[i]), .b(b[i]),
++                .ainvert(ainvert), .binvert(binvert),
++                .cin(c[i]),
++                .less(i == 0 ? is_less : 1'b0),   // only bit 0 gets the result of slt
++                .operation(operation),
++                .result(result[i]), .cout(c[i+1]), .sum(sum[i])
++            );
++        end
++    endgenerate
++
++    // overflow: carry into the sign bit differs from carry out of it
++    assign overflow = c[N-1] ^ c[N];
++    // slt: the sign of a - b, corrected if the subtraction overflowed
++    assign is_less = sum[N-1] ^ overflow;
++    // zero: a NOR over all result bits
++    assign zero = ~|result;
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/alu_cell.v b/27_code_to_chip/02-cpu-go-board/alu_cell.v
+new file mode 100644
+index 0000000..9b32683
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/alu_cell.v
+@@ -0,0 +1,30 @@
++// 1-bit ALU cell from part 1 (chapter 05):
++// Ainvert and Binvert invert the inputs, Operation selects the result.
++//   Operation = 00: and   01: or   10: sum (add)   11: less (for slt)
++module alu_cell (
++    input  wire       a,
++    input  wire       b,
++    input  wire       ainvert,
++    input  wire       binvert,
++    input  wire       cin,
++    input  wire       less,
++    input  wire [1:0] operation,
++    output reg        result,
++    output wire       cout,
++    output wire       sum           // needed by the most significant cell for slt
++);
++    wire aa = a ^ ainvert;          // the XOR as a controllable inverter
++    wire bb = b ^ binvert;
++
++    assign sum  = aa ^ bb ^ cin;    // full adder
++    assign cout = (aa & bb) | (cin & (aa ^ bb));
++
++    always @(*) begin
++        case (operation)
++            2'b00: result = aa & bb;
++            2'b01: result = aa | bb;
++            2'b10: result = sum;
++            2'b11: result = less;
++        endcase
++    end
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/alu_control.v b/27_code_to_chip/02-cpu-go-board/alu_control.v
+new file mode 100644
+index 0000000..dcad6c7
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/alu_control.v
+@@ -0,0 +1,23 @@
++// ALU control (chapter 17): the second decoding stage.
++// From the 2-bit ALUOp of the main control and, for R-type instructions,
++// from funct7 (only bit 30 of the instruction) and funct3, it generates
++// the 4 control bits {Ainvert, Binvert, Operation} of the ALU.
++module alu_control (
++    input  wire [1:0] alu_op,
++    input  wire       funct7_5,       // instruction bit 30
++    input  wire [2:0] funct3,
++    output reg  [3:0] alu_ctrl
++);
++    always @(*) begin
++        case (alu_op)
++            2'b00:   alu_ctrl = 4'b0010;                 // lw, sw, addi: add
++            2'b01:   alu_ctrl = 4'b0110;                 // beq, bne: sub
++            default: case (funct3)                       // R-type: look at funct
++                         3'b000:  alu_ctrl = funct7_5 ? 4'b0110 : 4'b0010;   // sub / add
++                         3'b111:  alu_ctrl = 4'b0000;    // and
++                         3'b110:  alu_ctrl = 4'b0001;    // or
++                         default: alu_ctrl = 4'b0010;
++                     endcase
++        endcase
++    end
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/control.v b/27_code_to_chip/02-cpu-go-board/control.v
+new file mode 100644
+index 0000000..88daa39
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/control.v
+@@ -0,0 +1,29 @@
++// Main control unit of the single-cycle CPU (chapter 17), pure combinational logic.
++// A decoder recognizes the opcode and activates exactly one line,
++// every control signal is an OR of the lines in which it is 1.
++module control (
++    input  wire [6:0] opcode,
++    output wire       reg_write,
++    output wire       alu_src,
++    output wire       mem_to_reg,
++    output wire       mem_read,
++    output wire       mem_write,
++    output wire       branch,
++    output wire [1:0] alu_op
++);
++    // decoder: one line per instruction type
++    wire r   = (opcode == 7'b0110011);   // add, sub, and, or
++    wire lw  = (opcode == 7'b0000011);
++    wire sw  = (opcode == 7'b0100011);
++    wire br  = (opcode == 7'b1100011);   // beq, bne
++    wire imm = (opcode == 7'b0010011);   // addi
++
++    // the equations from chapter 17, including the extension for addi
++    assign reg_write  = r | lw | imm;
++    assign alu_src    = lw | sw | imm;
++    assign mem_to_reg = lw;
++    assign mem_read   = lw;
++    assign mem_write  = sw;
++    assign branch     = br;
++    assign alu_op     = {r, br};         // ALUOp1 = R, ALUOp0 = BR
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/cpu.v b/27_code_to_chip/02-cpu-go-board/cpu.v
+new file mode 100644
+index 0000000..d3c97c2
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/cpu.v
+@@ -0,0 +1,89 @@
++// Single-cycle RISC-V CPU from chapter 26, prepared for the iCE40 FPGA (chapter 27).
++// Instructions: add, sub, and, or, addi, lw, sw, beq, bne.
++// Changes compared to chapter 26:
++//  - ce (clock enable): the CPU executes one instruction per clock cycle in which ce = 1.
++//    All storing elements (PC, register file, data memory) only change when ce = 1.
++//  - the register file lives in block RAM (see regfile.v), the data memory has 8 words.
++//  - debug outputs: the PC and a copy of register x1, because the contents of a block RAM
++//    cannot be watched from outside.
++module cpu #(
++    parameter PROGRAM = "program.hex"
++) (
++    input  wire        clk,
++    input  wire        rst,
++    input  wire        ce,          // clock enable: execute one instruction
++    output wire [31:0] dbg_pc,      // current PC
++    output reg  [31:0] dbg_x1       // copy of register x1
++);
++    // ---- instruction fetch -------------------------------------------------
++    reg  [31:0] pc;
++    wire [31:0] inst;
++    wire [31:0] pc_plus4 = pc + 4;               // first adder
++
++    instr_mem #(.PROGRAM(PROGRAM)) imem (.addr(pc), .inst(inst));
++
++    // ---- decode: the fields of the instruction ----------------------------
++    wire [6:0] opcode = inst[6:0];
++    wire [4:0] rd     = inst[11:7];
++    wire [2:0] funct3 = inst[14:12];
++    wire [4:0] rs1    = inst[19:15];
++    wire [4:0] rs2    = inst[24:20];
++
++    // ---- control ------------------------------------------------------------
++    wire       reg_write, alu_src, mem_to_reg, mem_read, mem_write, branch;
++    wire [1:0] alu_op;
++    wire [3:0] alu_ctrl;
++
++    control ctl (
++        .opcode(opcode), .reg_write(reg_write), .alu_src(alu_src),
++        .mem_to_reg(mem_to_reg), .mem_read(mem_read), .mem_write(mem_write),
++        .branch(branch), .alu_op(alu_op)
++    );
++    alu_control actl (.alu_op(alu_op), .funct7_5(inst[30]), .funct3(funct3), .alu_ctrl(alu_ctrl));
++
++    // ---- register file and immediate ---------------------------------------
++    wire [31:0] rd1, rd2, imm, write_data;
++
++    regfile rf (
++        .clk(clk), .rs1(rs1), .rs2(rs2), .rd1(rd1), .rd2(rd2),
++        .we(reg_write & ce), .rd(rd), .wd(write_data)
++    );
++    imm_gen ig (.inst(inst), .imm(imm));
++
++    // ---- execute -------------------------------------------------------------
++    wire [31:0] alu_b = alu_src ? imm : rd2;     // multiplexer in front of the ALU
++    wire [31:0] alu_result;
++    wire        zero, overflow;
++
++    alu #(.N(32)) alu (
++        .a(rd1), .b(alu_b), .ctrl(alu_ctrl),
++        .result(alu_result), .zero(zero), .overflow(overflow)
++    );
++
++    // ---- memory access ---------------------------------------------------------
++    wire [31:0] mem_data;
++
++    data_mem dmem (
++        .clk(clk), .addr(alu_result), .mem_read(mem_read), .mem_write(mem_write & ce),
++        .wd(rd2), .rd(mem_data)
++    );
++
++    // ---- write back ------------------------------------------------------------
++    assign write_data = mem_to_reg ? mem_data : alu_result;   // multiplexer behind the memory
++
++    // ---- next PC ---------------------------------------------------------------
++    wire [31:0] branch_target = pc + imm;                     // second adder
++    wire        pc_src = branch & (zero ^ inst[12]);          // inst[12] = 1 for bne
++    wire [31:0] pc_next = pc_src ? branch_target : pc_plus4;  // multiplexer in front of the PC
++
++    always @(posedge clk)
++        if (rst)     pc <= 0;
++        else if (ce) pc <= pc_next;
++
++    // ---- debug ---------------------------------------------------------------
++    assign dbg_pc = pc;
++
++    always @(posedge clk)                                     // follows every write to x1
++        if (rst)                              dbg_x1 <= 0;
++        else if (ce && reg_write && rd == 1)  dbg_x1 <= write_data;
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/data_mem.v b/27_code_to_chip/02-cpu-go-board/data_mem.v
+new file mode 100644
+index 0000000..fa3febe
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/data_mem.v
+@@ -0,0 +1,23 @@
++// Data memory: 8 words (chapter 26: 64 words).
++// Reading is combinational (MemRead), writing happens on the rising clock edge (MemWrite).
++// With a combinational read, the memory cannot be mapped to block RAM, so it is built from
++// flip-flops. 8 words are enough for our counter program, which only uses address 4.
++module data_mem (
++    input  wire        clk,
++    input  wire [31:0] addr,
++    input  wire        mem_read,
++    input  wire        mem_write,
++    input  wire [31:0] wd,
++    output wire [31:0] rd
++);
++    reg [31:0] mem [0:7];
++
++    integer i;
++    initial for (i = 0; i < 8; i = i + 1) mem[i] = 0;    // initial values work on the iCE40, too
++
++    assign rd = mem_read ? mem[addr[4:2]] : 32'd0;
++
++    always @(posedge clk)
++        if (mem_write)
++            mem[addr[4:2]] <= wd;
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/go_board_top.v b/27_code_to_chip/02-cpu-go-board/go_board_top.v
+new file mode 100644
+index 0000000..5bcf40e
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/go_board_top.v
+@@ -0,0 +1,64 @@
++// Top module for the Nandland Go Board: the CPU from chapter 26 on the iCE40 HX1K.
++//
++//  - clock enable: the CPU executes CE_DIV-th clock cycle one instruction.
++//    With CE_DIV = 6,250,000: 4 instructions per second at 25 MHz.
++//  - reset: automatically after power-up, and while button 1 is pressed.
++//  - output: the lowest byte of register x1 as two hex digits on the 7-segment displays,
++//    the instruction number (PC / 4) on the four LEDs.
++module go_board_top #(
++    parameter CE_DIV = 6_250_000          // must be at least 2, see regfile.v
++) (
++    input  wire i_Clk,                    // 25 MHz
++    input  wire i_Switch_1,               // reset
++    output wire o_LED_1,
++    output wire o_LED_2,
++    output wire o_LED_3,
++    output wire o_LED_4,
++    output wire o_Segment1_A, o_Segment1_B, o_Segment1_C, o_Segment1_D,
++    output wire o_Segment1_E, o_Segment1_F, o_Segment1_G,
++    output wire o_Segment2_A, o_Segment2_B, o_Segment2_C, o_Segment2_D,
++    output wire o_Segment2_E, o_Segment2_F, o_Segment2_G
++);
++    // ---- reset ------------------------------------------------------------------
++    // The button is not synchronous to the clock: two flip-flops in a row (synchronizer)
++    // keep a metastable state away from the rest of the circuit.
++    reg [1:0] sw_sync = 2'b00;
++    always @(posedge i_Clk)
++        sw_sync <= {sw_sync[0], i_Switch_1};
++
++    // power-on reset: the first 15 clock cycles after configuration
++    reg [3:0] por = 4'd0;
++    always @(posedge i_Clk)
++        if (por != 4'd15) por <= por + 1;
++
++    wire rst = (por != 4'd15) | sw_sync[1];
++
++    // ---- clock enable ---------------------------------------------------------------
++    // Instead of a slower clock, ce is 1 for exactly one cycle every CE_DIV cycles.
++    // The whole design runs on the 25 MHz clock, which stays on the global clock network.
++    reg [$clog2(CE_DIV)-1:0] div = 0;
++    reg                      ce  = 1'b0;
++    always @(posedge i_Clk)
++        if (div == CE_DIV - 1) begin div <= 0;       ce <= 1'b1; end
++        else                   begin div <= div + 1; ce <= 1'b0; end
++
++    // ---- CPU --------------------------------------------------------------------------
++    wire [31:0] pc, x1;
++
++    cpu #(.PROGRAM("program.hex")) cpu (
++        .clk(i_Clk), .rst(rst), .ce(ce), .dbg_pc(pc), .dbg_x1(x1)
++    );
++
++    // ---- output -------------------------------------------------------------------------
++    assign {o_LED_4, o_LED_3, o_LED_2, o_LED_1} = pc[5:2];       // instruction number 0..6
++
++    wire [6:0] seg_hi, seg_lo;                                   // {g,f,e,d,c,b,a}, 1 = on
++    seven_seg dec_hi (.value(x1[7:4]), .seg(seg_hi));
++    seven_seg dec_lo (.value(x1[3:0]), .seg(seg_lo));
++
++    // the segments of the Go Board are active low
++    assign {o_Segment1_G, o_Segment1_F, o_Segment1_E, o_Segment1_D,
++            o_Segment1_C, o_Segment1_B, o_Segment1_A} = ~seg_hi;
++    assign {o_Segment2_G, o_Segment2_F, o_Segment2_E, o_Segment2_D,
++            o_Segment2_C, o_Segment2_B, o_Segment2_A} = ~seg_lo;
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/go_board_top_tb.v b/27_code_to_chip/02-cpu-go-board/go_board_top_tb.v
+new file mode 100644
+index 0000000..8af7974
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/go_board_top_tb.v
+@@ -0,0 +1,50 @@
++`timescale 1ns / 1ps
++
++// Testbench for the complete Go Board design.
++// CE_DIV = 4 instead of 6,250,000: one instruction every 4 clock cycles.
++// The testbench prints one line per instruction and checks the result at the end:
++// x1 = 10, the PC loops at 0x18, and the displays show "0A".
++// The LEDs show the instruction number of the NEXT instruction (PC / 4).
++module go_board_top_tb;
++    reg  clk = 0, sw1 = 0;
++    wire l1, l2, l3, l4;
++    wire s1a, s1b, s1c, s1d, s1e, s1f, s1g;
++    wire s2a, s2b, s2c, s2d, s2e, s2f, s2g;
++    integer n = 0;
++    reg [31:0] pc_now;
++
++    always #20 clk = ~clk;                                   // 25 MHz
++
++    go_board_top #(.CE_DIV(4)) dut (
++        .i_Clk(clk), .i_Switch_1(sw1),
++        .o_LED_1(l1), .o_LED_2(l2), .o_LED_3(l3), .o_LED_4(l4),
++        .o_Segment1_A(s1a), .o_Segment1_B(s1b), .o_Segment1_C(s1c), .o_Segment1_D(s1d),
++        .o_Segment1_E(s1e), .o_Segment1_F(s1f), .o_Segment1_G(s1g),
++        .o_Segment2_A(s2a), .o_Segment2_B(s2b), .o_Segment2_C(s2c), .o_Segment2_D(s2d),
++        .o_Segment2_E(s2e), .o_Segment2_F(s2f), .o_Segment2_G(s2g)
++    );
++
++    // one line per executed instruction (at every clock edge with ce = 1, after reset)
++    always @(posedge clk)
++        if (dut.ce && !dut.rst) begin
++            n = n + 1;
++            pc_now = dut.cpu.pc;                             // PC of the instruction executed now
++            #1 $display("instruction %2d  PC=0x%02h  x1=%2d  -> LEDs show %b%b%b%b",
++                        n, pc_now[7:0], dut.cpu.dbg_x1, l4, l3, l2, l1);
++        end
++
++    initial begin
++        $dumpfile("go_board_top.vcd");
++        $dumpvars(0, go_board_top_tb);
++        #(40 * 4 * 40);                                      // 40 instructions
++        $display("display: left gfedcba = %b%b%b%b%b%b%b, right gfedcba = %b%b%b%b%b%b%b (0 = on)",
++                 s1g, s1f, s1e, s1d, s1c, s1b, s1a, s2g, s2f, s2e, s2d, s2c, s2b, s2a);
++        if (dut.cpu.dbg_x1 == 10 && dut.cpu.pc == 32'h18 &&
++            {s1g, s1f, s1e, s1d, s1c, s1b, s1a} == ~7'b0111111 &&     // "0"
++            {s2g, s2f, s2e, s2d, s2c, s2b, s2a} == ~7'b1110111)       // "A"
++            $display("PASSED: x1 = 10, display shows 0A, CPU loops at 0x18");
++        else
++            $display("FAILED: x1 = %0d, PC = 0x%h", dut.cpu.dbg_x1, dut.cpu.pc);
++        $finish;
++    end
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/imm_gen.v b/27_code_to_chip/02-cpu-go-board/imm_gen.v
+new file mode 100644
+index 0000000..37df43b
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/imm_gen.v
+@@ -0,0 +1,19 @@
++// Immediate generator (chapter 17): extracts the constant from the instruction
++// and sign-extends it to 32 bits. The sign bit is always inst[31].
++module imm_gen (
++    input  wire [31:0] inst,
++    output reg  [31:0] imm
++);
++    wire [6:0] opcode = inst[6:0];
++
++    always @(*) begin
++        case (opcode)
++            7'b0100011:                                          // S-type: sw
++                imm = {{20{inst[31]}}, inst[31:25], inst[11:7]};
++            7'b1100011:                                          // B-type: beq, bne
++                imm = {{19{inst[31]}}, inst[31], inst[7], inst[30:25], inst[11:8], 1'b0};
++            default:                                             // I-type: lw, addi
++                imm = {{20{inst[31]}}, inst[31:20]};
++        endcase
++    end
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/instr_mem.v b/27_code_to_chip/02-cpu-go-board/instr_mem.v
+new file mode 100644
+index 0000000..af4518d
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/instr_mem.v
+@@ -0,0 +1,15 @@
++// Instruction memory: 64 words, read-only, loaded from a hex file at simulation start.
++// The address is a byte address; since every instruction is 4 bytes long,
++// the lowest two bits are always 0 and are not used.
++module instr_mem #(
++    parameter PROGRAM = "program.hex"
++) (
++    input  wire [31:0] addr,
++    output wire [31:0] inst
++);
++    reg [31:0] mem [0:63];
++
++    initial $readmemh(PROGRAM, mem);
++
++    assign inst = mem[addr[7:2]];
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/program.hex b/27_code_to_chip/02-cpu-go-board/program.hex
+new file mode 100644
+index 0000000..5ec5514
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/program.hex
+@@ -0,0 +1,10 @@
++// Example program from chapters 15 and 17: counts from 1 to 10
++// and writes every value to data memory address 4.
++// One instruction (32 bit) per line, starting at address 0x00.
++00000093  // 0x00:        addi x1, x0, 0      x1 = 0  (counter)
++00100113  // 0x04:        addi x2, x0, 1      x2 = 1  (step)
++00a00193  // 0x08:        addi x3, x0, 10     x3 = 10 (end value)
++002080b3  // 0x0C: loop:  add  x1, x1, x2     x1 = x1 + x2
++00102223  // 0x10:        sw   x1, 4(x0)      memory[4] = x1
++fe309ce3  // 0x14:        bne  x1, x3, loop   offset -8
++00000063  // 0x18: done:  beq  x0, x0, done   endless loop, offset 0
+diff --git a/27_code_to_chip/02-cpu-go-board/regfile.v b/27_code_to_chip/02-cpu-go-board/regfile.v
+new file mode 100644
+index 0000000..1c1a817
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/regfile.v
+@@ -0,0 +1,41 @@
++// RISC-V register file in block RAM (chapter 26: built from flip-flops).
++//
++// The iCE40 block RAM can only be read on a clock edge. So reading is no longer combinational:
++// rd1 and rd2 show the registers that were selected by rs1 and rs2 at the last rising edge.
++// A block RAM has one read port, so there are two copies (bank1, bank2) that are always
++// written together - one copy per read port.
++//
++// Important: this only works because of the clock enable in the CPU. After every instruction
++// (ce = 1), the register file needs one more clock edge to read the operands of the next
++// instruction. So ce must never be 1 in two clock cycles in a row.
++module regfile (
++    input  wire        clk,
++    input  wire [4:0]  rs1,         // read port 1
++    input  wire [4:0]  rs2,         // read port 2
++    output wire [31:0] rd1,
++    output wire [31:0] rd2,
++    input  wire        we,          // RegWrite (already combined with ce)
++    input  wire [4:0]  rd,          // write port
++    input  wire [31:0] wd
++);
++    reg [31:0] bank1 [0:31];
++    reg [31:0] bank2 [0:31];
++    reg [31:0] q1, q2;
++    reg        zero1, zero2;        // was register x0 selected?
++
++    always @(posedge clk) begin     // read: synchronous -> block RAM
++        q1    <= bank1[rs1];
++        q2    <= bank2[rs2];
++        zero1 <= (rs1 == 0);
++        zero2 <= (rs2 == 0);
++    end
++
++    always @(posedge clk)           // write
++        if (we && rd != 0) begin
++            bank1[rd] <= wd;
++            bank2[rd] <= wd;
++        end
++
++    assign rd1 = zero1 ? 32'd0 : q1;    // x0 always reads as 0
++    assign rd2 = zero2 ? 32'd0 : q2;
++endmodule
+diff --git a/27_code_to_chip/02-cpu-go-board/seven_seg.v b/27_code_to_chip/02-cpu-go-board/seven_seg.v
+new file mode 100644
+index 0000000..d2762fe
+--- /dev/null
++++ b/27_code_to_chip/02-cpu-go-board/seven_seg.v
+@@ -0,0 +1,28 @@
++// 7-segment decoder for the hexadecimal digits 0..F
++// segment order: seg = {g, f, e, d, c, b, a}, 1 = segment on
++module seven_seg (
++    input  wire [3:0] value,
++    output reg  [6:0] seg
++);
++    always @(*) begin
++        case (value)
++            4'h0: seg = 7'b0111111;
++            4'h1: seg = 7'b0000110;
++            4'h2: seg = 7'b1011011;
++            4'h3: seg = 7'b1001111;
++            4'h4: seg = 7'b1100110;
++            4'h5: seg = 7'b1101101;
++            4'h6: seg = 7'b1111101;
++            4'h7: seg = 7'b0000111;
++            4'h8: seg = 7'b1111111;
++            4'h9: seg = 7'b1101111;
++            4'hA: seg = 7'b1110111;
++            4'hB: seg = 7'b1111100;
++            4'hC: seg = 7'b0111001;
++            4'hD: seg = 7'b1011110;
++            4'hE: seg = 7'b1111001;
++            4'hF: seg = 7'b1110001;
++            default: seg = 7'b0000000;
++        endcase
++    end
++endmodule
+diff --git a/27_code_to_chip/fpga.mk b/27_code_to_chip/fpga.mk
+new file mode 100644
+index 0000000..4aa249e
+--- /dev/null
++++ b/27_code_to_chip/fpga.mk
+@@ -0,0 +1,41 @@
++# Shared build rules for the Go Board examples (included by every Makefile in this folder).
++# Each Makefile sets TOP (top module), SRC (Verilog files) and optionally TB (testbench).
++#
++#   make        synthesis, place & route, bitstream  ->  $(TOP).bin
++#   make prog   load the bitstream onto the Go Board (via USB)
++#   make stat   resource usage after synthesis
++#   make sim    simulate the testbench with Icarus Verilog
++#   make clean  remove generated files
++
++PCF ?= ../go_board.pcf
++
++all: $(TOP).bin
++
++# 1. synthesis: Verilog -> netlist of iCE40 cells (LUTs, flip-flops, block RAM)
++$(TOP).json: $(SRC)
++	yosys -q -l $(TOP)_yosys.log -p "synth_ice40 -top $(TOP) -json $@" $(SRC)
++
++# 2. place & route: every cell gets a place on the chip, then the wires are routed;
++#    --freq 25: timing analysis against the 25 MHz clock of the Go Board
++$(TOP).asc: $(TOP).json $(PCF)
++	nextpnr-ice40 --hx1k --package vq100 --freq 25 --json $< --pcf $(PCF) --asc $@ \
++	    2>&1 | tee $(TOP)_nextpnr.log | grep -E "(ICESTORM_LC|ICESTORM_RAM|SB_IO): |Max frequency for clock|ERROR"
++
++# 3. bitstream: the configuration of the chip as a binary file
++$(TOP).bin: $(TOP).asc
++	icepack $< $@
++
++# 4. load it onto the board
++prog: $(TOP).bin
++	iceprog $<
++
++stat: $(SRC)
++	yosys -q -p "synth_ice40 -top $(TOP); tee -o /dev/stdout stat" $(SRC)
++
++sim: $(TB) $(SRC)
++	iverilog -o sim $(TB) $(SRC) && vvp sim
++
++clean:
++	rm -f *.json *.asc *.bin *.log *.vcd *.svg *.dot sim
++
++.PHONY: all prog stat sim clean
+diff --git a/27_code_to_chip/go_board.pcf b/27_code_to_chip/go_board.pcf
+new file mode 100644
+index 0000000..dd8c192
+--- /dev/null
++++ b/27_code_to_chip/go_board.pcf
+@@ -0,0 +1,37 @@
++# Nandland Go Board (iCE40 HX1K, VQ100) - pins used in chapter 27
++# Signal names and pins as in Nandland's official Go_Board_Constraints.pcf
++# (https://nandland.com/project-1-your-first-go-board-project/).
++# -nowarn: no warning if a design does not use a pin.
++
++# 25 MHz clock
++set_io -nowarn i_Clk        15
++
++# LEDs (1 = on)
++set_io -nowarn o_LED_1      56
++set_io -nowarn o_LED_2      57
++set_io -nowarn o_LED_3      59
++set_io -nowarn o_LED_4      60
++
++# push buttons (1 = pressed)
++set_io -nowarn i_Switch_1   53
++set_io -nowarn i_Switch_2   51
++set_io -nowarn i_Switch_3   54
++set_io -nowarn i_Switch_4   52
++
++# 7-segment display 1 (left digit)
++set_io -nowarn o_Segment1_A  3
++set_io -nowarn o_Segment1_B  4
++set_io -nowarn o_Segment1_C 93
++set_io -nowarn o_Segment1_D 91
++set_io -nowarn o_Segment1_E 90
++set_io -nowarn o_Segment1_F  1
++set_io -nowarn o_Segment1_G  2
++
++# 7-segment display 2 (right digit)
++set_io -nowarn o_Segment2_A 100
++set_io -nowarn o_Segment2_B  99
++set_io -nowarn o_Segment2_C  97
++set_io -nowarn o_Segment2_D  95
++set_io -nowarn o_Segment2_E  94
++set_io -nowarn o_Segment2_F   8
++set_io -nowarn o_Segment2_G  96
+diff --git a/README.md b/README.md
+index 36d2d90..e506e9a 100644
+--- a/README.md
++++ b/README.md
+@@ -34,3 +34,22 @@ The exhaustive tests of the sequential multiplier and divider run through all 65
+ and take a few seconds.
+ In `26_cpu_verilog/03-cpu`, Icarus warns that `program.hex` has fewer than 64 words. That is fine:
+ the rest of the instruction memory is never used.
++
++## Chapter 27: on the FPGA (Nandland Go Board)
++
++The examples in `27_code_to_chip` run on the [Nandland Go Board](https://nandland.com/the-go-board/)
++(Lattice iCE40 HX1K, VQ100). Additional requirements: the open-source FPGA toolchain
++[Yosys](https://github.com/YosysHQ/yosys), [nextpnr](https://github.com/YosysHQ/nextpnr) (`nextpnr-ice40`)
++and [Project IceStorm](https://github.com/YosysHQ/icestorm) (`icepack`, `iceprog`) - for example from the
++[OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build) or the packages `yosys nextpnr-ice40 fpga-icestorm`.
++
++Every folder has a `Makefile` (shared rules in `27_code_to_chip/fpga.mk`), the pins are in `27_code_to_chip/go_board.pcf`:
++
++| Folder | Commands |
++|---|---|
++| `27_code_to_chip/00-blinky` | `make sim` (simulate), `make` (bitstream), `make prog` (load onto the board) |
++| `27_code_to_chip/01-synthesis` | `make sim`, `make stat` (resource usage), `make schematic` (SVG, needs graphviz), `make`, `make prog` |
++| `27_code_to_chip/02-cpu-go-board` | `make sim`, `make`, `make prog` |
++
++`make clean` removes all generated files. On Linux, `iceprog` may need permission to access the USB device
++(udev rule or `sudo`).
+-- 
+2.43.0
+

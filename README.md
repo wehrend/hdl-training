@@ -34,3 +34,22 @@ The exhaustive tests of the sequential multiplier and divider run through all 65
 and take a few seconds.
 In `26_cpu_verilog/03-cpu`, Icarus warns that `program.hex` has fewer than 64 words. That is fine:
 the rest of the instruction memory is never used.
+
+## Chapter 27: on the FPGA (Nandland Go Board)
+
+The examples in `27_code_to_chip` run on the [Nandland Go Board](https://nandland.com/the-go-board/)
+(Lattice iCE40 HX1K, VQ100). Additional requirements: the open-source FPGA toolchain
+[Yosys](https://github.com/YosysHQ/yosys), [nextpnr](https://github.com/YosysHQ/nextpnr) (`nextpnr-ice40`)
+and [Project IceStorm](https://github.com/YosysHQ/icestorm) (`icepack`, `iceprog`) - for example from the
+[OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build) or the packages `yosys nextpnr-ice40 fpga-icestorm`.
+
+Every folder has a `Makefile` (shared rules in `27_code_to_chip/fpga.mk`), the pins are in `27_code_to_chip/go_board.pcf`:
+
+| Folder | Commands |
+|---|---|
+| `27_code_to_chip/00-blinky` | `make sim` (simulate), `make` (bitstream), `make prog` (load onto the board) |
+| `27_code_to_chip/01-synthesis` | `make sim`, `make stat` (resource usage), `make schematic` (SVG, needs graphviz), `make`, `make prog` |
+| `27_code_to_chip/02-cpu-go-board` | `make sim`, `make`, `make prog` |
+
+`make clean` removes all generated files. On Linux, `iceprog` may need permission to access the USB device
+(udev rule or `sudo`).

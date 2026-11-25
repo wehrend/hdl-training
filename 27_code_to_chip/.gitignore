@@ -1,0 +1,7 @@
+*.json
+*.asc
+*.bin
+*.log
+*.svg
+sim
+*.dot

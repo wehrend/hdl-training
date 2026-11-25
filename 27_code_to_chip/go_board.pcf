@@ -1,0 +1,37 @@
+# Nandland Go Board (iCE40 HX1K, VQ100) - pins used in chapter 27
+# Signal names and pins as in Nandland's official Go_Board_Constraints.pcf
+# (https://nandland.com/project-1-your-first-go-board-project/).
+# -nowarn: no warning if a design does not use a pin.
+
+# 25 MHz clock
+set_io -nowarn i_Clk        15
+
+# LEDs (1 = on)
+set_io -nowarn o_LED_1      56
+set_io -nowarn o_LED_2      57
+set_io -nowarn o_LED_3      59
+set_io -nowarn o_LED_4      60
+
+# push buttons (1 = pressed)
+set_io -nowarn i_Switch_1   53
+set_io -nowarn i_Switch_2   51
+set_io -nowarn i_Switch_3   54
+set_io -nowarn i_Switch_4   52
+
+# 7-segment display 1 (left digit)
+set_io -nowarn o_Segment1_A  3
+set_io -nowarn o_Segment1_B  4
+set_io -nowarn o_Segment1_C 93
+set_io -nowarn o_Segment1_D 91
+set_io -nowarn o_Segment1_E 90
+set_io -nowarn o_Segment1_F  1
+set_io -nowarn o_Segment1_G  2
+
+# 7-segment display 2 (right digit)
+set_io -nowarn o_Segment2_A 100
+set_io -nowarn o_Segment2_B  99
+set_io -nowarn o_Segment2_C  97
+set_io -nowarn o_Segment2_D  95
+set_io -nowarn o_Segment2_E  94
+set_io -nowarn o_Segment2_F   8
+set_io -nowarn o_Segment2_G  96
